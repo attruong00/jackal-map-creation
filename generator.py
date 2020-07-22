@@ -1,7 +1,15 @@
+
 import gen_world_ca
 import sys
 import os
+from os.path import basename
 from zipfile import ZipFile
+
+def is_world(s):
+    return '.world' in s
+
+def is_grid(s):
+    return 'grid_' in s
 
 def zipFilesInDir(dirName, zipFileName, filter):
     # create ZipFile object
@@ -20,12 +28,16 @@ def main():
     showHeatMap = 0
 
     # generate worlds
-    for i in range(50):
-      gen_world_ca.main(i, smooths, fillPct, showHeatMap)
+    for i in range(2):
+      gen_world_ca.main(i)
+
+    # get current directory
+    curr_dir = os.getcwd()
+    print(curr_dir)
 
     # zip files
-    zipFilesInDir('~/jackal_ws/src/jackal_simulator/jackal_gazebo/worlds/', 'sampleWorlds.zip', lambda name : '.world' in name)
-    zipFilesInDir('~/jackal_ws/src/jackal_simulator/jackal_gazebo/worlds/', 'sampleMaps.zip', lambda name : '.npy' in name)
+    zipFilesInDir(curr_dir, 'sampleWorlds.zip', is_world)
+    zipFilesInDir(curr_dir, 'sampleGrids.zip', is_grid)
 
 
 if __name__ == "__main__":
