@@ -7,7 +7,9 @@ import matplotlib.pyplot as plt
 import Tkinter as tk
 from world_writer import WorldWriter
 import numpy as np
+import difficulty_quant
 from difficulty_quant import DifficultyMetrics
+from pgm_writer import PGMWriter
 
 
 def_kernel_size = 4
@@ -218,7 +220,8 @@ class JackalMap:
     return coords_cleared
 
   # returns a path between all points in the list points using A*
-  def getPath(self, points):
+  # if a valid path cannot be found, returns None
+  def getPath(self, points, dist_map):
     num_points = len(points)
     if num_points < 2:
       raise Exception("Path needs at least two points")
@@ -234,7 +237,10 @@ class JackalMap:
 
       # generate path between this point and the next one in the list
       a_star = AStarSearch(self.map)
-      intermediate_path = a_star(points[n], points[n+1])
+
+      intermediate_path = a_star(points[n], points[n+1], dist_map)
+      if not intermediate_path:
+        return None
       
       # add to the overall path
       if n > 0:
@@ -275,7 +281,19 @@ class AStarSearch:
     self.map_rows = len(map)
     self.map_cols = len(map[0])
 
-  def __call__(self, start_coord, end_coord):
+  def __call__(self, start_coord, end_coord, dist_map):
+    # limit turns to 45 degrees
+    valid_moves_dict = {
+      (0, 1): [(-1, 1), (0, 1), (1, 1)],
+      (1, 1): [(0, 1), (1, 1), (1, 0)],
+      (1, 0): [(1, 1), (1, 0), (1, -1)],
+      (1, -1): [(1, 0), (1, -1), (0, -1)],
+      (0, -1): [(1, -1), (0, -1), (-1, -1)],
+      (-1, -1): [(0, -1), (-1, -1), (-1, 0)],
+      (-1, 0): [(-1, -1), (-1, 0), (-1, 1)],
+      (-1, 1): [(-1, 0), (-1, 1), (0, 1)]
+    }
+
     # initialize start and end nodes
     start_node = Node(None, start_coord)
     start_node.g = start_node.h = start_node.f = 0
@@ -291,6 +309,7 @@ class AStarSearch:
 
     # while there are nodes to process
     while len(not_visited) > 0:
+      
       # get lowest cost next node
       curr_node = not_visited[0]
       curr_idx = 0
@@ -298,8 +317,8 @@ class AStarSearch:
         if node.f < curr_node.f:
           curr_node = node
           curr_idx = idx
-
-      # mark this node as processed
+          
+      # pop this node from the unvisited list and add to visited list
       not_visited.pop(curr_idx)
       visited.append(curr_node)
 
@@ -307,18 +326,7 @@ class AStarSearch:
       if curr_node == end_node:
         return self.returnPath(curr_node)
 
-      # limit turns to 45 degrees
-      valid_moves_dict = {
-        (0, 1): [(-1, 1), (0, 1), (1, 1)],
-        (1, 1): [(0, 1), (1, 1), (1, 0)],
-        (1, 0): [(1, 1), (1, 0), (1, -1)],
-        (1, -1): [(1, 0), (1, -1), (0, -1)],
-        (0, -1): [(1, -1), (0, -1), (-1, -1)],
-        (-1, -1): [(0, -1), (-1, -1), (-1, 0)],
-        (-1, 0): [(-1, -1), (-1, 0), (-1, 1)],
-        (-1, 1): [(-1, 0), (-1, 1), (0, 1)]
-      }
-
+      # get all valid moves (either straight or 45 degree turn)
       valid_moves = []
       if curr_node == start_node:
         # if start node, can go any direction
@@ -351,25 +359,38 @@ class AStarSearch:
         child_node = Node(curr_node, child_pos)
         children.append(child_node)
 
-
       # loop through all walkable neighbors of this node
       for child in children:
 
-        # if neighbor already visited, not usable
+        # if already processed, don't use
         if child in visited:
           continue
 
-        # calculate f, g, h values
-        child.g += 1
-        child.h = math.sqrt(((child.r - end_node.r) ** 2) + ((child.c - end_node.c) ** 2))
-        child.f = child.g + child.h
+        # calculate g value
+        child_g = curr_node.g + 1
 
-        # if this node is already in the unprocessed list
-        # with a g-value lower than what we have, don't add it
-        if len([i for i in not_visited if child == i and child.g > i.g]) > 0:
-          continue
+        # check if this node is already in the unprocessed list
+        child_in_openset = False
+        for node in not_visited:
+          if node == child:
+            child_in_openset = True
 
-        not_visited.append(child)
+            # if the node is already in the list, but with a higher cost,
+            # update the cost to this new lower one
+            if child_g < node.g:
+              node.parent = curr_node
+              node.g = child_g
+              node.h = math.sqrt(((child.r - end_node.r) ** 2) + ((child.c - end_node.c) ** 2))
+
+              # distance from start + distance to end + factor to penalize cells close to walls
+              node.f = node.g + node.h + (1 / dist_map[child.r][child.c])
+
+        # if child is not yet in the unprocessed list, add it
+        if not child_in_openset:
+          child.g = child_g
+          child.h = math.sqrt(((child.r - end_node.r) ** 2) + ((child.c - end_node.c) ** 2))
+          child.f = child.g + child.f + (1 / dist_map[child.r][child.c])
+          not_visited.append(child)
 
   # generate the path from start to end
   def returnPath(self, end_node):
@@ -398,20 +419,21 @@ class Node:
  
 
 class Display:
-  def __init__(self, map, map_with_path, jackal_map, jackal_map_with_path, density_radius, dispersion_radius):
+  def __init__(self, map, path, map_with_path, jackal_map, jackal_map_with_path, density_radius, dispersion_radius):
     self.map = map
+    self.path = path
     self.map_with_path = map_with_path
     self.jackal_map = jackal_map
     self.jackal_map_with_path = jackal_map_with_path
     self.density_radius = density_radius
     self.dispersion_radius = dispersion_radius
   
-    diff = DifficultyMetrics(jackal_map)
+    diff = DifficultyMetrics(jackal_map, path, density_radius)
     self.metrics = {
       "closestDist": diff.closestWall(),
-      "density": diff.density(density_radius),
+      "density": diff.density(),
       "avgVis": diff.avgVisibility(),
-      "dispersion": diff.dispersion(dispersion_radius),
+      "dispersion": diff.dispersion(),
       "char_dimension": diff.characteristic_dimension(),
     }
 
@@ -559,71 +581,9 @@ class Input:
       self.inputs["showMetrics"] = default_show_metrics
       
     self.root.destroy()
-
-
-# metric_map is a grid with the value of that metric at each cell
-# path is the list of points that make up the path
-# normalize_metric is the function to normalize the metric
-def metric_avg(metric_map, path, normalize_metric):
-    total = 0.0
-    for point in path:
-      total += normalize_metric(metric_map[path[0]][path[1]])
-  
-    return total / len(path)
-
-def metric_avg_with_radius(metric_map, path, normalize_metric, radius):
-    total = 0.0
-    for point in path:
-        total += normalize_metric(metric_map[path[0]][path[1]], radius)
-  
-    return total / len(path)
-  
-
-# diff is DifficultyMetrics created from jackal c-space map
-# return a numpy array
-def all_metrics_avg(diff, path, radius):
-
-    DM = DifficultyMetrics
-    # list of metric averages
-    result = []
-    total = 0.0
-    
-    # density
-    densities = diff.density(radius)
-    avg_all_density = metric_avg_with_radius(densities, path, DM.normalize_density, radius)
-    result.append(avg_all_density)
-    total += avg_all_density
-
-    # closest wall
-    closest_walls = diff.closestWall()
-    avg_closest_walls = metric_avg(closest_walls, path, DM.normalize_nearest_obs)
-    result.append()
-    total += avg_closest_walls
-
-    # avgVisibility
-    avgVisibilites = diff.avgVisibility()
-    avg_all_visibilities = metric_avg(avgVisibilites, path, DM.normalize_avgVis)
-    result.append(avg_all_visibilities)
-    total += avg_all_visibilities
-
-    # dispersion
-    dispersions = diff.dispersion(radius)
-    avg_dispersion = metric_avg(dispersions, path, DM.normalize_dispersion)
-    result.append(avg_dispersion)
-    total += avg_dispersion
-
-    # characteristic_dimension
-    char_dimensions = diff.characteristic_dimension()
-    avg_char_dims = metric_avg(char_dimensions, path, DM.normalize_dist)
-    result.appendavg_char_dims
-    total += avg_char_dims
-
-    result.append(total / 5)
-
-    return np.asarray(result)
     
 
-def main(iteration=0):
+def main(iteration=0, seed=0, smoothIter=4, fillPct=.35, rows=25, cols=50, showMetrics=0):
 
     # dirName = "~/jackal_ws/src/jackal_simulator/jackal_gazebo/worlds/"
 
@@ -631,17 +591,18 @@ def main(iteration=0):
     grid_file = "grid_" + str(iteration) + ".npy"
     path_file = "path_" + str(iteration) + ".npy"
     diff_file = "difficulties_" + str(iteration) + ".npy"
+    pgm_file = "map_pgm_" + str(iteration) + ".pgm"
 
     # get user parameters, if provided
     # inputWindow = Input()
     # inputDict = inputWindow.inputs
 
-    inputDict = { "seed" : hash(datetime.datetime.now()),
-                  "smoothIter": 4,
-                  "fillPct" : 0.35,
-                  "rows" : 25,
-                  "cols" : 25,
-                  "showMetrics" : 1 }
+    inputDict = { "seed" : seed,
+                  "smoothIter": smoothIter,
+                  "fillPct" : fillPct,
+                  "rows" : rows,
+                  "cols" : cols,
+                  "showMetrics" : showMetrics }
 
     # create 25x25 world generator and run smoothing iterations
     print("Seed: %d" % inputDict["seed"])
@@ -665,8 +626,9 @@ def main(iteration=0):
 
     # write map to .world file
     cyl_radius = 0.075
-    writer = WorldWriter(world_file, obstacle_map, cyl_radius)
-    writer()
+    contain_wall_length = 5
+    writer = WorldWriter(world_file, obstacle_map, cyl_radius=cyl_radius, contain_wall_length=contain_wall_length)
+    contain_wall_cylinders = writer()
     r_shift, c_shift = writer.getShifts()
 
     """ Generate random points to demonstrate path """
@@ -684,8 +646,15 @@ def main(iteration=0):
     
     # generate path, if possible
     path = []
+    diff_quant = DifficultyMetrics(jackal_map, path, radius=3)
+    dist_map = diff_quant.closestWall()
     print("Points: (%d, 0), (%d, %d)" % (left_coord_r, right_coord_r, len(jackal_map[0])-1))
-    path = jMapGen.getPath([(left_coord_r, 0), (right_coord_r, len(jackal_map[0])-1)])
+    path = jMapGen.getPath([(left_coord_r, 0), (right_coord_r, len(jackal_map[0])-1)], dist_map)
+
+    if not path:
+      print("path not found")
+      return # path not found, throw this one out
+
     print("Found path!")
 
 
@@ -711,7 +680,6 @@ def main(iteration=0):
     jackal_map_with_path[right_coord_r][len(jackal_map[0])-1] = 0.65
     obstacle_map_with_path[left_coord_r][0] = 0.65
     obstacle_map_with_path[right_coord_r][len(obstacle_map[0])-1] = 0.65
-
     
     grid_arr = np.asarray(obstacle_map)
     np.save(grid_file, grid_arr)
@@ -719,21 +687,30 @@ def main(iteration=0):
     path_arr = np.asarray(path)
     np.save(path_file, path_arr)
 
-    diff = DifficultyMetrics(jackal_map)
-    metrics_arr = all_metrics_avg(diff, path, 3)
+    diff = DifficultyMetrics(jackal_map, path, radius=3)
+    metrics_arr = np.asarray(diff.avg_all_metrics())
+    print(metrics_arr)
     np.save(diff_file, metrics_arr)
 
-    
+
+    # write the map to a pgm file for navigation
+    pgm_writer = PGMWriter(obstacle_map, contain_wall_cylinders, pgm_file)
+    pgm_writer()
+
+
+    """
     # display world and heatmap of distances
     if inputDict["showMetrics"]:
-      display = Display(obstacle_map, obstacle_map_with_path, jackal_map, jackal_map_with_path, density_radius=3, dispersion_radius=3)
+      display = Display(obstacle_map, path, obstacle_map_with_path, jackal_map, jackal_map_with_path, density_radius=3, dispersion_radius=3)
       display()
 
     # only show the map itself
     else:
       plt.imshow(obstacle_map_with_path, cmap='Greys', interpolation='nearest')
       plt.show()
+    """
         
+    return True # path found
 
 if __name__ == "__main__":
     main()
