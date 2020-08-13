@@ -1,8 +1,0 @@
-image: %s
-resolution: %f
-origin: [%f, %f, %f]
-occupied_thresh: 0.5
-free_thresh: 0.5
-negate: 0
-
-
