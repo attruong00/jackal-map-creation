@@ -318,8 +318,4 @@ class DifficultyMetrics:
     running_total += norm_avg
     result.append(norm_avg)
 
-    # final average
-    num_metrics = 6
-    result.append(running_total / num_metrics)
-
     return result
