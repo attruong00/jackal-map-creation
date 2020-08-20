@@ -13,7 +13,9 @@ from pgm_writer import PGMWriter
 from yaml_writer import YamlWriter
 
 
-def_kernel_size = 5 # to account for Jackal's inflation radius
+jackal_radius = 2 # to account for Jackal's inflation radius
+pgm_res = 0.15 # meters per pixel
+infl_rad = 0.3 # meters
 
 class ObstacleMap():
   def __init__(self, rows, cols, randFillPct, seed=None, smoothIter=5):
@@ -85,15 +87,13 @@ class ObstacleMap():
     return self.map
 
 class JackalMap:
-  def __init__(self, ob_map, kernel_size):
+  def __init__(self, ob_map, robot_radius):
     self.ob_map = ob_map
-    self.ob_rows = len(ob_map)
-    self.ob_cols = len(ob_map[0])
+    self.rows = len(ob_map)
+    self.cols = len(ob_map[0])
 
-    self.kernel_size = kernel_size
-    self.map = self._jackalMapFromObstacleMap(self.kernel_size)
-    self.rows = len(self.map)
-    self.cols = len(self.map[0])
+    self.map = self._jackalMapFromObstacleMap(robot_radius)
+    self.infl_rad_cells = self.calc_infl_rad_cells()
 
   # use flood-fill algorithm to find the open region including (r, c)
   def _getRegion(self, r, c):
@@ -237,7 +237,7 @@ class JackalMap:
       overall_path.append(points[n])
 
       # generate path between this point and the next one in the list
-      a_star = AStarSearch(self.map)
+      a_star = AStarSearch(self.map, self.infl_rad_cells)
 
       intermediate_path = a_star(points[n], points[n+1], dist_map)
       if not intermediate_path:
@@ -250,37 +250,47 @@ class JackalMap:
 
     return overall_path
 
-  def _jackalMapFromObstacleMap(self, kernel_size):
-    output_size = (self.ob_rows - kernel_size + 1, self.ob_cols - kernel_size + 1)
-    jackal_map = [[0 for i in range(output_size[1])] for j in range(output_size[0])]
-    
-    for r in range(0, self.ob_rows - kernel_size + 1):
-      for c in range(0, self.ob_cols - kernel_size + 1):
-        if not self._kernelWindowIsOpen(kernel_size, r, c):
-          jackal_map[r][c] = 1
+  # robot_radius is how many cells from the center cell the robot takes up
+  # robot_radius of 1 means robot takes up 3x3 cells
+  # robot_radius of 2 means robot takes up 5x5 cells
+  def _jackalMapFromObstacleMap(self, robot_radius):
+    jackal_map = [[0 for i in range(self.cols)] for j in range(self.rows)]
 
+    for r in range(self.rows):
+      for c in range(self.cols):
+        if not self._open(r, c, robot_radius):
+          jackal_map[r][c] = 1
     return jackal_map
 
-  def _kernelWindowIsOpen(self, kernel_size, r, c):
-    for r_kernel in range(r, r + kernel_size):
-      for c_kernel in range(c, c + kernel_size):
-        if self.ob_map[r_kernel][c_kernel] == 1:
+  # checks robot_radius cells outward from (r, c)
+  # returns true if robot center can be located at (r, c)
+  def _open(self, row, col, robot_radius):
+    for r in range(row - robot_radius, row + robot_radius + 1):
+      for c in range(col - robot_radius, col + robot_radius + 1):
+        if self._isInMap(r, c) and self.ob_map[r][c] == 1:
           return False
 
     return True
 
   def _isInMap(self, r, c):
-    return r >= 0 and r < self.rows and c >= 0 and c < self.cols
+    return 0 <= r and r < self.rows and 0 <= c and c < self.cols
+
+  # translate the inflation radius from meters to cells
+  def calc_infl_rad_cells(self):
+    rad_in_cells = infl_rad * (1.0 / pgm_res)
+    return round(rad_in_cells, 0)
+
 
   def getMap(self):
     return self.map
 
 
 class AStarSearch:
-  def __init__(self, map):
+  def __init__(self, map, infl_rad_cells): ######################## added infl_rad_cells
     self.map = map
     self.map_rows = len(map)
     self.map_cols = len(map[0])
+    self.infl_rad_cells = infl_rad_cells ########################
 
   def __call__(self, start_coord, end_coord, dist_map):
     # limit turns to 45 degrees
@@ -294,6 +304,9 @@ class AStarSearch:
       (-1, 0): [(-1, -1), (-1, 0), (-1, 1)],
       (-1, 1): [(-1, 0), (-1, 1), (0, 1)]
     }
+
+    # cost factor for cells within the inflation radius
+    penalty_factor = 5.0
 
     # initialize start and end nodes
     start_node = Node(None, start_coord)
@@ -368,7 +381,9 @@ class AStarSearch:
           continue
 
         # calculate g value
-        child_g = curr_node.g + 1
+        child_g = curr_node.g + math.sqrt((curr_node.r - child.r) ** 2 + (curr_node.c - child.c) **2)
+        in_radius = dist_map[child.r][child.c] <= self.infl_rad_cells
+        penalty = (penalty_factor / dist_map[child.r][child.c]) if in_radius else 0
 
         # check if this node is already in the unprocessed list
         child_in_openset = False
@@ -384,13 +399,13 @@ class AStarSearch:
               node.h = math.sqrt(((child.r - end_node.r) ** 2) + ((child.c - end_node.c) ** 2))
 
               # distance from start + distance to end + factor to penalize cells close to walls
-              node.f = node.g + node.h + (0.25 / dist_map[child.r][child.c])
+              node.f = node.g + node.h + penalty
 
         # if child is not yet in the unprocessed list, add it
         if not child_in_openset:
           child.g = child_g
           child.h = math.sqrt(((child.r - end_node.r) ** 2) + ((child.c - end_node.c) ** 2))
-          child.f = child.g + child.f + (0.25 / dist_map[child.r][child.c])
+          child.f = child.g + child.f + penalty
           not_visited.append(child)
 
   # generate the path from start to end
@@ -613,35 +628,18 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
 
     # get map from the obstacle map generator
     obstacle_map = obMapGen.getMap()
-
-    """
-    # show initial obstacle map ########################
-    plt.imshow(obstacle_map, cmap='Greys', interpolation='nearest')
-    plt.show()
-    """
     
     # generate jackal's map from the obstacle map & ensure connectivity
-    jMapGen = JackalMap(obstacle_map, def_kernel_size)
+    jMapGen = JackalMap(obstacle_map, jackal_radius)
     startRegion = jMapGen.biggestLeftRegion()
     endRegion = jMapGen.biggestRightRegion()
 
-
-    """
-    # show initial jackal map ########################
-    plt.imshow(jMapGen._jackalMapFromObstacleMap(5), cmap='Greys', interpolation='nearest')
-    plt.show()
-    """
-
-    cleared_coords = jMapGen.connectRegions(startRegion, endRegion)
-
-    # throw out any maps that don't have a path ######################
-    if len(cleared_coords) != 0:
+    # throw out any maps that don't have a path
+    if not jMapGen.regionsAreConnected(startRegion, endRegion):
       return
 
     # get the final jackal map and update the obstacle map
     jackal_map = jMapGen.getMap()
-
-    # obstacle_map = obMapGen.updateObstacleMap(cleared_coords, def_kernel_size) ##############
 
     # write map to .world file
     cyl_radius = 0.075
@@ -650,7 +648,7 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
     contain_wall_cylinders = writer()
     r_shift, c_shift = writer.getShifts()
 
-    """ Generate random points to demonstrate path """
+    # Generate random start and end points for path
     left_open = []
     right_open = []
     for r in range(len(jackal_map)):
@@ -660,7 +658,7 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
         right_open.append(r)
     left_coord_r = left_open[random.randint(0, len(left_open)-1)]
     right_coord_r = right_open[random.randint(0, len(right_open)-1)]
-    """ End random point selection """
+
 
     
     # generate path, if possible
@@ -684,7 +682,7 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
     end_c = len(obstacle_map[0]) * cyl_radius * 2 + c_shift
     print("Start: (%f, %f) to Goal: (%f, %f)" % (start_r, start_c, end_r, end_c))
 
-    # put paths into matrixes to display them
+    # put paths into matrices to display them
     obstacle_map_with_path = [[obstacle_map[j][i] for i in range(len(obstacle_map[0]))] for j in range(len(obstacle_map))]
     jackal_map_with_path = [[jackal_map[j][i] for i in range(len(jackal_map[0]))] for j in range(len(jackal_map))]
     for r, c in path:
@@ -692,20 +690,26 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
       jackal_map_with_path[r][c] = 0.35
 
       # update obstacle-space path display
-      for r_kernel in range(r, r + def_kernel_size):
-        for c_kernel in range(c, c + def_kernel_size):
-          obstacle_map_with_path[r_kernel][c_kernel] = 0.35
+      for r_kernel in range(r - jackal_radius, r + jackal_radius + 1):
+        for c_kernel in range(c - jackal_radius, c + jackal_radius + 1):
+          if 0 <= r_kernel and r_kernel < rows and 0 <= c_kernel and c_kernel < cols:
+            obstacle_map_with_path[r_kernel][c_kernel] = 0.35
+
+
     jackal_map_with_path[left_coord_r][0] = 0.65
     jackal_map_with_path[right_coord_r][len(jackal_map[0])-1] = 0.65
     obstacle_map_with_path[left_coord_r][0] = 0.65
     obstacle_map_with_path[right_coord_r][len(obstacle_map[0])-1] = 0.65
     
+    # save occupancy grid
     grid_arr = np.asarray(obstacle_map)
     np.save(grid_file, grid_arr)
 
+    # save path
     path_arr = np.asarray(path)
     np.save(path_file, path_arr)
 
+    # save metrics
     diff = DifficultyMetrics(jackal_map, path, radius=3)
     metrics_arr = np.asarray(diff.avg_all_metrics())
     print(metrics_arr)
@@ -716,12 +720,12 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
     pgm_writer = PGMWriter(obstacle_map, contain_wall_cylinders, pgm_file)
     pgm_writer()
 
-    # write metadata to yaml file
+    # write map metadata to yaml file
     yw = YamlWriter(yaml_file, iteration)
     yw.write()
     
 
-    """
+    
     # display world and heatmap of distances
     if inputDict["showMetrics"]:
       display = Display(obstacle_map, path, obstacle_map_with_path, jackal_map, jackal_map_with_path, density_radius=3, dispersion_radius=3)
@@ -731,9 +735,10 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
     else:
       plt.imshow(obstacle_map_with_path, cmap='Greys', interpolation='nearest')
       plt.show()
-    """
+    
         
     return True # path found
+
 
 if __name__ == "__main__":
     main(iteration = -1, seed=2422863611227240384, fillPct=0.2, smoothIter=4)
