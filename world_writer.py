@@ -13,25 +13,46 @@ with open("./world-boilerplate/cylinder_place.txt") as f:
 
 class WorldWriter():
 
-  def __init__(self, filename, map, cyl_radius):
+  def __init__(self, filename, map, cyl_radius, contain_wall_length):
     self.file = open(filename, "w")
     self.map = map
     self.numCylinders = 0
     self.cylinderList = []
     self.cyl_radius = cyl_radius
+    self.r_shift = -(len(self.map) - 1) * self.cyl_radius * 2
+    self.c_shift = 1.95
+    self.contain_wall_length = contain_wall_length
 
   def __call__(self):
     # write .world boilerplate at start
     self._writeStarterBoiler()
 
-    # define all the cylinders we're using in .world
-    radius_ratio = self.cyl_radius / 0.5
-    r_shift = -len(self.map) * self.cyl_radius
-    c_shift = 2
+    c_lower = self.cyl_radius
+    c_upper = self.cyl_radius + self.contain_wall_length
+    r_lower = -self.cyl_radius
+    r_upper = self.r_shift - self.cyl_radius
+
+    # create the back containment wall
+    r_coord = r_lower
+    while r_coord >= r_upper:
+      self._createCylinder(r_coord, c_lower, 0, 0, 0, 0, radius=self.cyl_radius)
+      r_coord -= self.cyl_radius * 2
+
+    # create the upper and lower containment walls
+    c_coord = c_lower + self.cyl_radius * 2
+    while c_coord <= c_upper:
+      self._createCylinder(r_lower, c_coord, 0, 0, 0, 0, radius=self.cyl_radius)
+      self._createCylinder(r_upper, c_coord, 0, 0, 0, 0, radius=self.cyl_radius)
+      c_coord += self.cyl_radius * 2
+
+
+    # define all cylinders in the actual obstacle field
+    c_lower = c_coord
     for r in range(len(self.map)):
       for c in range(len(self.map[0])):
         if self.map[r][c] == 1 and not self._allNeighborsFilled(r, c):
-          self._createCylinder((r*radius_ratio)+r_shift, (c*radius_ratio)+c_shift, 0, 0, 0, 0, radius=self.cyl_radius)
+          self._createCylinder(r_upper + r * self.cyl_radius * 2, c_lower + c * self.cyl_radius * 2, 0, 0, 0, 0, radius=self.cyl_radius)
+
 
     # write .world middle boilerplate
     self._writeMidBoiler()
@@ -44,6 +65,9 @@ class WorldWriter():
 
     # close file
     self._close()
+
+    contain_wall_cylinders = self.contain_wall_length / (self.cyl_radius * 2)
+    return int(contain_wall_cylinders)
 
   # returns true if all 8 spaces around (r, c) are filled, false otherwise
   def _allNeighborsFilled(self, r, c):
@@ -64,6 +88,7 @@ class WorldWriter():
     self.file.write(cylinder_define % (
         self.numCylinders, pos_x, pos_y, pos_z, rot_a, rot_b, rot_c, radius, radius
     ))
+    self.file.write("\n")
     
     self.cylinderList.append([pos_x, pos_y, pos_z, rot_a, rot_b, rot_c])
     self.numCylinders += 1
@@ -79,10 +104,14 @@ class WorldWriter():
           self.cylinderList[i][0], self.cylinderList[i][1], self.cylinderList[i][2], 
           self.cylinderList[i][3], self.cylinderList[i][4], self.cylinderList[i][5], 
       ))
+      self.file.write("\n")
 
   def _writeEndBoiler(self):
     self.file.write(world_boiler_end)
 
   def _close(self):
     self.file.close()
+
+  def getShifts(self):
+    return self.r_shift, self.c_shift
    
