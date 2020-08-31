@@ -94,11 +94,6 @@ class DifficultyMetrics:
 
     return dist
 
-  # dist is the result of calling _dist on an empty cell
-  # returns value between 0 and 1
-  def normalize_dist(self, dist):
-    dist += 1
-    return 1.0 / dist
 
   # a and b are points (2-tuples)
   def _dist_between_points(self, a, b):
@@ -113,8 +108,6 @@ class DifficultyMetrics:
     chord_len = self._dist_between_points(self.path[0], self.path[-1])
     return arc_len / chord_len
 
-  def normalize_tortuosity(self, tort):
-    return (-1.0 / tort) + 1
 
   def _cellDispersion(self, r, c, radius):
     if self.map[r][c] == 1:
@@ -159,12 +152,6 @@ class DifficultyMetrics:
 
     return change_count
 
-  # param disperson is the return value of calling _cellDispersion on a cell
-  # returns value between 0 and 1
-  # _cellDispersion returns a value between 0 and 16, since it checks 16 directions
-  def normalize_dispersion(self, disp):
-    return disp / 16.0
-
   def _avgVisCell(self, r, c):
     total_vis = 0
     num_axes = 0
@@ -196,10 +183,6 @@ class DifficultyMetrics:
     
     return total_vis / num_axes
 
-  # avgVis is the return value of a call to _avgVisCell
-  def normalize_avgVis(self, avgVis):
-    return 1.0 / avgVis
-
   def _densityOfTile(self, row, col, radius):
     count = 0
     for r in range(row-radius, row+radius+1):
@@ -208,12 +191,6 @@ class DifficultyMetrics:
           count += self.map[r][c]
 
     return count   
-
-  # density is the return value of a call to _densityOfTile
-  # _densityOfTile returns a value in range [0, (2*radius + 1) ^ 2 - 1]
-  def normalize_density(self, dens, radius):
-    highest_possible = (2 * radius + 1) ** 2.0
-    return dens / highest_possible
 
   # simple bounds check
   def _isInMap(self, r, c):
@@ -245,11 +222,6 @@ class DifficultyMetrics:
     # in case the queue is empty before a wall is found (shouldn't happen),
     # the farthest a cell can be from a wall is half the board, since the top and bottom rows are all walls
     return (self.rows - 1) / 2
-
-  # given the distance to the nearest obstacle, return a value in range (0, 1]
-  # this value is supposed to approximate difficulty wrt distance to nearest obstacle
-  def normalize_closest_wall(self, dist_closest_wall):
-    return 1.0 / dist_closest_wall
 
   # wrapper class for coordinates
   class Wrapper:
