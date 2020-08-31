@@ -264,58 +264,42 @@ class DifficultyMetrics:
     def __lt__(self, value):
       return self.dist < value.dist
 
-  # return a list of the normalized average for all metrics
-  # metrics are averaged over each point in the path
+  # returns a list of all metrics, averaged over all points in path except for
+  # tortuosity, which is not averaged over the path
   def avg_all_metrics(self):
     result = []
-
-    total = 0.0
-    running_total = 0.0
-
-    # density
-    for row, col in self.path:
-      total += self._densityOfTile(row, col, self.radius)
-    norm_avg = self.normalize_density(total / len(self.path), self.radius)
-    running_total += norm_avg
-    result.append(norm_avg)
 
     # closest wall
     total = 0.0
     for row, col in self.path:
       total += self._distToClosestWall(row, col)
-    norm_avg = self.normalize_closest_wall(total / len(self.path))
-    running_total += norm_avg
-    result.append(norm_avg)  
+    avg = total / len(self.path)
+    result.append(avg)
     
     # average visibility
     total = 0.0
     for row, col in self.path:
       total += self._avgVisCell(row, col)
-    norm_avg = self.normalize_avgVis(total / len(self.path))
-    running_total += norm_avg
-    result.append(norm_avg) 
+    avg = total / len(self.path)
+    result.append(avg)
 
     # dispersion
     total = 0.0
     for row, col in self.path:
       total += self._cellDispersion(row, col, self.radius)
-    norm_avg = self.normalize_dispersion(total / len(self.path))
-    running_total += norm_avg
-    result.append(norm_avg)
+    avg = total / len(self.path)
+    result.append(avg)
 
     # characteristic dimension
     total = 0.0
     char_dim_grid = self.characteristic_dimension()
     for row, col in self.path:
       total += char_dim_grid[row][col]
-    norm_avg = self.normalize_dist(total / len(self.path))
-    running_total += norm_avg
-    result.append(norm_avg)
+    avg = total / len(self.path)
+    result.append(avg)
 
     # tortuosity
     tort = self.tortuosity()
-    norm_avg = self.normalize_tortuosity(tort)
-    running_total += norm_avg
-    result.append(norm_avg)
+    result.append(tort)
 
     return result
