@@ -603,12 +603,13 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
 
     # dirName = "~/jackal_ws/src/jackal_simulator/jackal_gazebo/worlds/"
 
-    world_file = "data/world_files/world_" + str(iteration) + ".world"
-    grid_file = "data/grid_files/grid_" + str(iteration) + ".npy"
-    path_file = "data/path_files/path_" + str(iteration) + ".npy"
-    diff_file = "data/diff_files/difficulties_" + str(iteration) + ".npy"
-    pgm_file = "data/map_files/map_pgm_" + str(iteration) + ".pgm"
-    yaml_file = "data/map_files/yaml_" + str(iteration) + ".yaml"
+    world_file = "dataset/world_files/world_" + str(iteration) + ".world"
+    grid_file = "dataset/grid_files/grid_" + str(iteration) + ".npy"
+    cspace_file = "dataset/cspace_files/cspace_" + str(iteration)  +".npy"
+    path_file = "dataset/path_files/path_" + str(iteration) + ".npy"
+    metrics_file = "dataset/metrics_files/metrics_" + str(iteration) + ".npy"
+    pgm_file = "dataset/map_files/map_pgm_" + str(iteration) + ".pgm"
+    yaml_file = "dataset/map_files/yaml_" + str(iteration) + ".yaml"
 
     # get user parameters, if provided
     # inputWindow = Input()
@@ -705,6 +706,10 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
     grid_arr = np.asarray(obstacle_map)
     np.save(grid_file, grid_arr)
 
+    # save c-space
+    cspace = np.asarray(jackal_map)
+    np.save(cspace_file, cspace)
+
     # save path
     path_arr = np.asarray(path)
     np.save(path_file, path_arr)
@@ -713,7 +718,7 @@ def main(iteration=0, seed=0, smoothIter=4, fillPct=.27, rows=30, cols=30, showM
     diff = DifficultyMetrics(jackal_map, path, radius=3)
     metrics_arr = np.asarray(diff.avg_all_metrics())
     print(metrics_arr)
-    np.save(diff_file, metrics_arr)
+    np.save(metrics_file, metrics_arr)
 
 
     # write the map to a pgm file for navigation
